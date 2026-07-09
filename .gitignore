@@ -1,0 +1,11 @@
+__pycache__/
+*.py[cod]
+*.tmp
+*.log
+*.bak
+*.ttf
+*.otf
+*.ttc
+*.otc
+!test-fixtures/**/*.ttf
+!test-fixtures/**/*.otf
