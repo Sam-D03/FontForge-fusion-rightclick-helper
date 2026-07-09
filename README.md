@@ -82,6 +82,14 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\Uninstall-ContextMenu.
 
 This removes the Explorer context-menu entry. It does not uninstall any fonts you already generated.
 
+## Remove A Generated Fusion Font
+
+Because generated fonts are installed system-wide, removing one usually needs the same administrator elevation as installing it:
+
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\Remove-FusionFont.ps1 "FUSION Bahnschrift" -ShowMessage
+```
+
 ## Duplicate Font Behavior
 
 The helper intentionally stops if a matching `FUSION ...` font file or Windows Fonts registry entry already exists.
