@@ -66,9 +66,13 @@ def postscript_name(source_name: str, digest: str) -> str:
     return value
 
 
-def output_file_name(ps_name: str, extension: str) -> str:
-    filename = re.sub(r"[^A-Za-z0-9._-]+", "-", ps_name).strip(".-")
-    return (filename or "FUSION-Font") + extension.lower()
+def output_file_name(display_name: str, style_name: str, extension: str) -> str:
+    # Windows' special Fonts folder often searches backing filenames more
+    # reliably than virtual font display names, so keep this human-readable.
+    filename = safe_display_name(f"{display_name} {style_name}")
+    filename = re.sub(r"[\x00-\x1f<>:\"/\\|?*]+", " ", filename)
+    filename = clean_spaces(filename).rstrip(".")
+    return (filename or "FUSION Font") + extension.lower()
 
 
 def first_sfnt_value(font, name_id: str) -> str:
@@ -102,7 +106,8 @@ def build_plan(source_path: Path, font) -> dict:
     target_base = safe_display_name(target_base)
 
     ps_name = postscript_name(target_base.removeprefix("FUSION "), digest)
-    filename = output_file_name(ps_name, extension)
+    subfamily_name = "Regular"
+    filename = output_file_name(target_base, subfamily_name, extension)
     font_type = SUPPORTED_EXTENSIONS[extension]
 
     return {
@@ -111,7 +116,7 @@ def build_plan(source_path: Path, font) -> dict:
         "source_full_name": source_full,
         "family_name": target_base,
         "full_name": target_base,
-        "subfamily_name": "Regular",
+        "subfamily_name": subfamily_name,
         "postscript_name": ps_name,
         "unique_id": f"FusionFontRepair:{ps_name}:{digest[:16]}",
         "output_file_name": filename,

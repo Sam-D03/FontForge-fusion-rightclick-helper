@@ -329,12 +329,21 @@ using System;
 using System.Runtime.InteropServices;
 
 public static class FusionFontRepairNative {
+    [DllImport("gdi32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+    public static extern int AddFontResourceW(string lpFileName);
+
     [DllImport("user32.dll", SetLastError = true)]
     public static extern bool SendNotifyMessage(IntPtr hWnd, uint Msg, UIntPtr wParam, IntPtr lParam);
+
+    [DllImport("shell32.dll", CharSet = CharSet.Unicode)]
+    public static extern void SHChangeNotify(int wEventId, uint uFlags, string dwItem1, string dwItem2);
 }
 '@
     Add-Type -TypeDefinition $source -ErrorAction SilentlyContinue
+    [FusionFontRepairNative]::AddFontResourceW($targetFontPath) | Out-Null
     [FusionFontRepairNative]::SendNotifyMessage([IntPtr] 0xffff, 0x001d, [UIntPtr]::Zero, [IntPtr]::Zero) | Out-Null
+    [FusionFontRepairNative]::SHChangeNotify(0x00002000, 0x0005, $targetFontPath, $null)
+    [FusionFontRepairNative]::SHChangeNotify(0x08000000, 0x0000, $null, $null)
 
     return $targetFontPath
 }

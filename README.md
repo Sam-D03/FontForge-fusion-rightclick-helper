@@ -11,6 +11,7 @@ If you normally open a font in FontForge, select every glyph, run **Overlap > Re
 - Runs FontForge headlessly through its bundled `ffpython.exe`.
 - Removes overlaps from every glyph in the font.
 - Creates a separate font identity named `FUSION <original font name>`.
+- Uses a human-readable installed filename such as `FUSION Bahnschrift Regular.ttf` so Windows' Fonts search has a better chance of finding it.
 - Installs the repaired font into `C:\Windows\Fonts`.
 - Stops if a matching `FUSION ...` font already appears to be installed.
 - Runs only when you right-click a font. There is no background service.
