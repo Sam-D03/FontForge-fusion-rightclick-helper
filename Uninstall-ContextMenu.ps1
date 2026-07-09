@@ -4,12 +4,29 @@ param()
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
-$extensions = @('.ttf', '.otf')
+$targets = @(
+    @{
+        Label = '.ttf normal files'
+        Key = 'HKCU:\Software\Classes\SystemFileAssociations\.ttf\shell\MakeFusionFont'
+    },
+    @{
+        Label = '.otf normal files'
+        Key = 'HKCU:\Software\Classes\SystemFileAssociations\.otf\shell\MakeFusionFont'
+    },
+    @{
+        Label = 'TrueType font class'
+        Key = 'HKCU:\Software\Classes\ttffile\shell\MakeFusionFont'
+    },
+    @{
+        Label = 'OpenType font class'
+        Key = 'HKCU:\Software\Classes\otffile\shell\MakeFusionFont'
+    }
+)
 
-foreach ($extension in $extensions) {
-    $menuKey = "HKCU:\Software\Classes\SystemFileAssociations\$extension\shell\MakeFusionFont"
+foreach ($target in $targets) {
+    $menuKey = $target.Key
     if (Test-Path -LiteralPath $menuKey) {
-        if ($PSCmdlet.ShouldProcess($extension, 'Remove Make Fusion Font context menu item')) {
+        if ($PSCmdlet.ShouldProcess($target.Label, 'Remove Make Fusion Font context menu item')) {
             Remove-Item -LiteralPath $menuKey -Recurse -Force
         }
     }

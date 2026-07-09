@@ -12,13 +12,30 @@ if (-not (Test-Path -LiteralPath $repairScript)) {
 
 $powershell = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
 $command = "`"$powershell`" -NoProfile -ExecutionPolicy Bypass -File `"$repairScript`" `"%1`" -ShowMessage"
-$extensions = @('.ttf', '.otf')
+$targets = @(
+    @{
+        Label = '.ttf normal files'
+        Key = 'HKCU:\Software\Classes\SystemFileAssociations\.ttf\shell\MakeFusionFont'
+    },
+    @{
+        Label = '.otf normal files'
+        Key = 'HKCU:\Software\Classes\SystemFileAssociations\.otf\shell\MakeFusionFont'
+    },
+    @{
+        Label = 'TrueType font class'
+        Key = 'HKCU:\Software\Classes\ttffile\shell\MakeFusionFont'
+    },
+    @{
+        Label = 'OpenType font class'
+        Key = 'HKCU:\Software\Classes\otffile\shell\MakeFusionFont'
+    }
+)
 
-foreach ($extension in $extensions) {
-    $menuKey = "HKCU:\Software\Classes\SystemFileAssociations\$extension\shell\MakeFusionFont"
+foreach ($target in $targets) {
+    $menuKey = $target.Key
     $commandKey = Join-Path $menuKey 'command'
 
-    if ($PSCmdlet.ShouldProcess($extension, 'Install Make Fusion Font context menu item')) {
+    if ($PSCmdlet.ShouldProcess($target.Label, 'Install Make Fusion Font context menu item')) {
         New-Item -Path $menuKey -Force | Out-Null
         Set-Item -LiteralPath $menuKey -Value 'Make Fusion Font'
         New-ItemProperty -LiteralPath $menuKey -Name 'Icon' -Value "$env:SystemRoot\System32\shell32.dll,174" -PropertyType String -Force | Out-Null
@@ -33,6 +50,6 @@ if ($WhatIfPreference) {
     Write-Host 'WhatIf complete. No context-menu registry entries were changed.'
 }
 else {
-    Write-Host 'Installed the Make Fusion Font right-click item for .ttf and .otf files.'
+    Write-Host 'Installed the Make Fusion Font right-click item for .ttf/.otf files and font file classes.'
     Write-Host 'On Windows 11 it may appear under "Show more options" depending on Explorer settings.'
 }
