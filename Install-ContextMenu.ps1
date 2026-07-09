@@ -1,8 +1,48 @@
 [CmdletBinding(SupportsShouldProcess = $true)]
-param()
+param(
+    [ValidateSet('CurrentUser', 'AllUsers')]
+    [string] $Scope = 'CurrentUser'
+)
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
+
+function Test-IsAdministrator {
+    $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
+    $principal = [Security.Principal.WindowsPrincipal]::new($identity)
+    return $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
+}
+
+function Get-ContextMenuTargets {
+    param([Parameter(Mandatory = $true)][string] $ClassesRoot)
+
+    return @(
+        @{
+            Label = '.ttf normal files'
+            Key = "$ClassesRoot\SystemFileAssociations\.ttf\shell\MakeFusionFont"
+        },
+        @{
+            Label = '.otf normal files'
+            Key = "$ClassesRoot\SystemFileAssociations\.otf\shell\MakeFusionFont"
+        },
+        @{
+            Label = 'TrueType font class'
+            Key = "$ClassesRoot\ttffile\shell\MakeFusionFont"
+        },
+        @{
+            Label = 'OpenType font class'
+            Key = "$ClassesRoot\otffile\shell\MakeFusionFont"
+        },
+        @{
+            Label = 'all file types fallback for Windows Fonts shell'
+            Key = "$ClassesRoot\*\shell\MakeFusionFont"
+        }
+    )
+}
+
+if ($Scope -eq 'AllUsers' -and -not (Test-IsAdministrator)) {
+    throw 'All-users context-menu installation requires administrator permission.'
+}
 
 $scriptDirectory = Split-Path -Parent $PSCommandPath
 $repairScript = Join-Path $scriptDirectory 'Repair-FusionFont.ps1'
@@ -12,28 +52,8 @@ if (-not (Test-Path -LiteralPath $repairScript)) {
 
 $powershell = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
 $command = "`"$powershell`" -NoProfile -ExecutionPolicy Bypass -File `"$repairScript`" `"%1`" -ShowMessage"
-$targets = @(
-    @{
-        Label = '.ttf normal files'
-        Key = 'HKCU:\Software\Classes\SystemFileAssociations\.ttf\shell\MakeFusionFont'
-    },
-    @{
-        Label = '.otf normal files'
-        Key = 'HKCU:\Software\Classes\SystemFileAssociations\.otf\shell\MakeFusionFont'
-    },
-    @{
-        Label = 'TrueType font class'
-        Key = 'HKCU:\Software\Classes\ttffile\shell\MakeFusionFont'
-    },
-    @{
-        Label = 'OpenType font class'
-        Key = 'HKCU:\Software\Classes\otffile\shell\MakeFusionFont'
-    },
-    @{
-        Label = 'all file types fallback for Windows Fonts shell'
-        Key = 'HKCU:\Software\Classes\*\shell\MakeFusionFont'
-    }
-)
+$classesRoot = if ($Scope -eq 'AllUsers') { 'HKLM:\Software\Classes' } else { 'HKCU:\Software\Classes' }
+$targets = Get-ContextMenuTargets -ClassesRoot $classesRoot
 
 foreach ($target in $targets) {
     $menuKey = $target.Key
@@ -55,6 +75,6 @@ if ($WhatIfPreference) {
     Write-Host 'WhatIf complete. No context-menu registry entries were changed.'
 }
 else {
-    Write-Host 'Installed the Make Fusion Font right-click item for .ttf/.otf files, font file classes, and Windows Fonts shell fallback.'
+    Write-Host "Installed the Make Fusion Font right-click item for .ttf/.otf files, font file classes, and Windows Fonts shell fallback. Scope: $Scope."
     Write-Host 'On Windows 11 it may appear under "Show more options" depending on Explorer settings.'
 }

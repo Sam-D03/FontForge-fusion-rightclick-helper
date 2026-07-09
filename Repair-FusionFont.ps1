@@ -18,6 +18,7 @@ $Script:FontRegistryPath = 'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\F
 $Script:UserFontRegistryPath = 'HKCU:\Software\Microsoft\Windows NT\CurrentVersion\Fonts'
 $Script:LogDirectory = Join-Path ([System.IO.Path]::GetTempPath()) 'FusionFontRepair'
 $Script:LogPath = Join-Path $Script:LogDirectory 'FusionFontRepair.log'
+$Script:ConfigFileName = 'fusion-font-repair.config.json'
 
 function Write-RepairLog {
     param([Parameter(Mandatory = $true)][string] $Message)
@@ -68,9 +69,41 @@ function Quote-Argument {
     return '"' + ($Value -replace '\\', '\\' -replace '"', '\"') + '"'
 }
 
+function Resolve-ConfiguredFFPython {
+    $scriptDirectory = Split-Path -Parent $PSCommandPath
+    $configPath = Join-Path $scriptDirectory $Script:ConfigFileName
+    if (-not (Test-Path -LiteralPath $configPath)) {
+        return $null
+    }
+
+    try {
+        $config = Get-Content -LiteralPath $configPath -Raw | ConvertFrom-Json
+        $configuredPath = $config.ffpython_path
+        if (-not $configuredPath) {
+            $configuredPath = $config.ffpython
+        }
+
+        if ($configuredPath -and (Test-Path -LiteralPath $configuredPath)) {
+            return (Resolve-Path -LiteralPath $configuredPath).Path
+        }
+
+        Write-RepairLog "Configured FontForge path is missing or invalid: '$configuredPath'."
+    }
+    catch {
+        Write-RepairLog "Could not read '$configPath': $($_.Exception.Message)"
+    }
+
+    return $null
+}
+
 function Resolve-FFPython {
     if ($env:FUSION_FONTFORGE_FFPYTHON -and (Test-Path -LiteralPath $env:FUSION_FONTFORGE_FFPYTHON)) {
         return (Resolve-Path -LiteralPath $env:FUSION_FONTFORGE_FFPYTHON).Path
+    }
+
+    $configuredFFPython = Resolve-ConfiguredFFPython
+    if ($configuredFFPython) {
+        return $configuredFFPython
     }
 
     $candidates = @(
@@ -84,7 +117,7 @@ function Resolve-FFPython {
         }
     }
 
-    throw 'Could not find FontForge ffpython.exe. Install FontForge or set FUSION_FONTFORGE_FFPYTHON to the full ffpython.exe path.'
+    throw 'Could not find FontForge ffpython.exe. Install FontForge, set FUSION_FONTFORGE_FFPYTHON, or update fusion-font-repair.config.json with the full ffpython.exe path.'
 }
 
 function Get-FontRegistryCandidates {

@@ -18,6 +18,18 @@ If you normally open a font in FontForge, select every glyph, run **Overlap > Re
 
 The source font is never modified.
 
+## Install From The Windows Installer
+
+1. Install [FontForge for Windows](https://fontforge.org/en-US/downloads/windows/) first.
+2. Download the latest `FusionFontForgeHelperSetup-*.exe` from the [GitHub Releases page](https://github.com/Sam-D03/FontForge-fusion-rightclick-helper/releases).
+3. Run the installer.
+4. Choose where to install this helper.
+5. Confirm the path to FontForge's `ffpython.exe`.
+
+The installer registers the **Make Fusion Font** right-click menu, stores the FontForge path in `fusion-font-repair.config.json`, and adds **Fusion FontForge Helper** to Windows **Installed apps**. Uninstalling it from Windows Settings removes the right-click menu and deletes the helper files.
+
+The installer does not remove any `FUSION ...` fonts you already generated. Use `Remove-FusionFont.ps1` or Windows font settings if you want to remove generated fonts.
+
 ## Requirements
 
 - Windows
@@ -31,9 +43,9 @@ By default the helper looks for FontForge here:
 C:\Program Files\FontForgeBuilds\bin\ffpython.exe
 ```
 
-If your FontForge install is somewhere else, set `FUSION_FONTFORGE_FFPYTHON` to the full path of `ffpython.exe`.
+If your FontForge install is somewhere else, the Windows installer will ask you to select the correct `ffpython.exe`. For manual use, set `FUSION_FONTFORGE_FFPYTHON` to the full path of `ffpython.exe`.
 
-## Install
+## Manual Install From Source
 
 Clone or download this repository, open PowerShell in the project folder, and run:
 
@@ -115,11 +127,22 @@ Not currently supported:
 
 `fusion_font_repair.py` opens the source font through FontForge, rewrites the internal name table, runs `glyph.removeOverlap()` for each glyph, and generates the repaired font file.
 
+## Build The Installer
+
+The release installer is built with [Inno Setup 6](https://jrsoftware.org/isinfo.php):
+
+```powershell
+winget install JRSoftware.InnoSetup
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\build-installer.ps1 -Version 1.0.0
+```
+
+The build writes `dist\FusionFontForgeHelperSetup-<version>.exe` and a matching `.sha256` checksum file.
+
 ## Troubleshooting
 
 **FontForge cannot be found**
 
-Install FontForge for Windows or set `FUSION_FONTFORGE_FFPYTHON`:
+Install FontForge for Windows, rerun the installer and select `ffpython.exe`, or set `FUSION_FONTFORGE_FFPYTHON`:
 
 ```powershell
 $env:FUSION_FONTFORGE_FFPYTHON = "C:\Path\To\ffpython.exe"

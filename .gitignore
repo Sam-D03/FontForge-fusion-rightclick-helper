@@ -3,6 +3,8 @@ __pycache__/
 *.tmp
 *.log
 *.bak
+dist/
+fusion-font-repair.config.json
 *.ttf
 *.otf
 *.ttc
