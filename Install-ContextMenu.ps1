@@ -28,6 +28,10 @@ $targets = @(
     @{
         Label = 'OpenType font class'
         Key = 'HKCU:\Software\Classes\otffile\shell\MakeFusionFont'
+    },
+    @{
+        Label = 'all file types fallback for Windows Fonts shell'
+        Key = 'HKCU:\Software\Classes\*\shell\MakeFusionFont'
     }
 )
 
@@ -39,6 +43,7 @@ foreach ($target in $targets) {
         New-Item -Path $menuKey -Force | Out-Null
         Set-Item -LiteralPath $menuKey -Value 'Make Fusion Font'
         New-ItemProperty -LiteralPath $menuKey -Name 'Icon' -Value "$env:SystemRoot\System32\shell32.dll,174" -PropertyType String -Force | Out-Null
+        New-ItemProperty -LiteralPath $menuKey -Name 'MultiSelectModel' -Value 'Single' -PropertyType String -Force | Out-Null
         New-ItemProperty -LiteralPath $menuKey -Name 'NoWorkingDirectory' -Value '' -PropertyType String -Force | Out-Null
 
         New-Item -Path $commandKey -Force | Out-Null
@@ -50,6 +55,6 @@ if ($WhatIfPreference) {
     Write-Host 'WhatIf complete. No context-menu registry entries were changed.'
 }
 else {
-    Write-Host 'Installed the Make Fusion Font right-click item for .ttf/.otf files and font file classes.'
+    Write-Host 'Installed the Make Fusion Font right-click item for .ttf/.otf files, font file classes, and Windows Fonts shell fallback.'
     Write-Host 'On Windows 11 it may appear under "Show more options" depending on Explorer settings.'
 }

@@ -20,6 +20,10 @@ $targets = @(
     @{
         Label = 'OpenType font class'
         Key = 'HKCU:\Software\Classes\otffile\shell\MakeFusionFont'
+    },
+    @{
+        Label = 'all file types fallback for Windows Fonts shell'
+        Key = 'HKCU:\Software\Classes\*\shell\MakeFusionFont'
     }
 )
 

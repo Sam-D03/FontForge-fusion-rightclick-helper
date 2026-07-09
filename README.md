@@ -7,6 +7,7 @@ If you normally open a font in FontForge, select every glyph, run **Overlap > Re
 ## What It Does
 
 - Adds a **Make Fusion Font** right-click action for `.ttf` and `.otf` files.
+- Adds a fallback context-menu entry for Windows' special Fonts shell view.
 - Runs FontForge headlessly through its bundled `ffpython.exe`.
 - Removes overlaps from every glyph in the font.
 - Creates a separate font identity named `FUSION <original font name>`.
@@ -41,7 +42,7 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\Install-ContextMenu.ps
 
 After that, right-click a `.ttf` or `.otf` file and choose **Make Fusion Font**.
 
-On Windows 11 the item may appear under **Show more options** depending on your Explorer settings.
+On Windows 11 the item may appear under **Show more options** depending on your Explorer settings. The installer also adds an all-file fallback entry so the command can appear inside Windows' virtual Fonts folder; the repair script still refuses non-font files.
 
 ## Use
 
