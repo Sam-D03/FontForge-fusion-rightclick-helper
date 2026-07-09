@@ -7,7 +7,11 @@ param(
 
     [switch] $NoInstall,
 
-    [switch] $ShowMessage
+    [switch] $ShowMessage,
+
+    [string] $StatusFile,
+
+    [switch] $DeferMessageToParent
 )
 
 Set-StrictMode -Version Latest
@@ -42,7 +46,7 @@ function Show-RepairMessage {
         [string] $Icon = 'Information'
     )
 
-    if (-not $ShowMessage) {
+    if (-not $ShowMessage -or $DeferMessageToParent) {
         return
     }
 
@@ -53,6 +57,54 @@ function Show-RepairMessage {
         [System.Windows.Forms.MessageBoxButtons]::OK,
         [System.Windows.Forms.MessageBoxIcon]::$Icon
     ) | Out-Null
+}
+
+function Write-RepairStatus {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string] $Message,
+
+        [ValidateSet('Information', 'Error', 'Warning')]
+        [string] $Icon = 'Information',
+
+        [int] $ExitCode = 0
+    )
+
+    if ([string]::IsNullOrWhiteSpace($StatusFile)) {
+        return
+    }
+
+    try {
+        $statusDirectory = Split-Path -Parent $StatusFile
+        if ($statusDirectory) {
+            New-Item -ItemType Directory -Force -Path $statusDirectory | Out-Null
+        }
+
+        [pscustomobject]@{
+            message = $Message
+            icon = $Icon
+            exit_code = $ExitCode
+        } | ConvertTo-Json -Depth 3 | Set-Content -LiteralPath $StatusFile -Encoding UTF8
+    }
+    catch {
+        Write-RepairLog "Could not write status file '$StatusFile': $($_.Exception.Message)"
+    }
+}
+
+function Read-RepairStatus {
+    param([Parameter(Mandatory = $true)][string] $Path)
+
+    if (-not (Test-Path -LiteralPath $Path)) {
+        return $null
+    }
+
+    try {
+        return Get-Content -LiteralPath $Path -Raw | ConvertFrom-Json
+    }
+    catch {
+        Write-RepairLog "Could not read status file '$Path': $($_.Exception.Message)"
+        return $null
+    }
 }
 
 function Test-IsAdministrator {
@@ -385,13 +437,25 @@ function Start-ElevatedSelf {
     param([Parameter(Mandatory = $true)][string] $ResolvedFontPath)
 
     $powershell = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
+    $childStatusFile = if ($StatusFile) {
+        $StatusFile
+    }
+    else {
+        $statusRoot = Join-Path ([System.IO.Path]::GetTempPath()) 'FusionFontRepair'
+        New-Item -ItemType Directory -Force -Path $statusRoot | Out-Null
+        Join-Path $statusRoot ("status-{0}.json" -f [guid]::NewGuid().ToString('N'))
+    }
+
     $arguments = @(
         '-NoProfile',
         '-ExecutionPolicy',
         'Bypass',
         '-File',
         $PSCommandPath,
-        $ResolvedFontPath
+        $ResolvedFontPath,
+        '-StatusFile',
+        $childStatusFile,
+        '-DeferMessageToParent'
     )
     if ($OutputDirectory) {
         $arguments += @('-OutputDirectory', $OutputDirectory)
@@ -405,6 +469,20 @@ function Start-ElevatedSelf {
 
     $argumentString = ($arguments | ForEach-Object { Quote-Argument $_ }) -join ' '
     $process = Start-Process -FilePath $powershell -ArgumentList $argumentString -Verb RunAs -PassThru -Wait
+
+    $status = Read-RepairStatus -Path $childStatusFile
+    if ($status -and $ShowMessage) {
+        $statusIcon = if ($status.icon) { [string] $status.icon } else { 'Information' }
+        Show-RepairMessage -Message ([string] $status.message) -Icon $statusIcon
+    }
+    elseif ($ShowMessage -and $process.ExitCode -ne 0) {
+        Show-RepairMessage -Message "Fusion Font Repair failed. Check the log:`n$Script:LogPath" -Icon Error
+    }
+
+    if (-not $StatusFile -and (Test-Path -LiteralPath $childStatusFile)) {
+        Remove-Item -LiteralPath $childStatusFile -Force -ErrorAction SilentlyContinue
+    }
+
     exit $process.ExitCode
 }
 
@@ -467,6 +545,7 @@ try {
         $message = "Created repaired font:`n$generatedPath`n`nInternal font name:`n$($result.full_name)"
         Write-RepairLog "Success. Created '$($result.full_name)' at '$generatedPath' without installing."
         Write-Host $message
+        Write-RepairStatus -Message $message -Icon Information -ExitCode 0
         Show-RepairMessage -Message $message -Icon Information
         exit 0
     }
@@ -481,6 +560,7 @@ try {
     $message = "Installed repaired font:`n$($result.full_name)`n`nFile:`n$installedPath"
     Write-RepairLog "Success. Installed '$($result.full_name)' to '$installedPath'."
     Write-Host $message
+    Write-RepairStatus -Message $message -Icon Information -ExitCode 0
     Show-RepairMessage -Message $message -Icon Information
     exit 0
 }
@@ -488,6 +568,7 @@ catch {
     $message = $_.Exception.Message
     Write-RepairLog "Error: $message"
     Write-Error $message
+    Write-RepairStatus -Message $message -Icon Error -ExitCode 1
     Show-RepairMessage -Message $message -Icon Error
     exit 1
 }
