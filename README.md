@@ -128,6 +128,16 @@ Close and reopen Fusion 360. Some apps only refresh the font list on startup.
 
 Uninstall the old `FUSION ...` font from Windows Settings or Control Panel, then run the helper again.
 
+**A PowerShell window flashes and disappears**
+
+Check the log at:
+
+```powershell
+$env:TEMP\FusionFontRepair\FusionFontRepair.log
+```
+
+The helper also tries to resolve Windows' virtual Fonts-folder display paths back to the real `.ttf` or `.otf` file before installing.
+
 ## License
 
 MIT. Use it, tweak it, share it.

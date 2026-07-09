@@ -1,7 +1,6 @@
 [CmdletBinding()]
 param(
-    [Parameter(Mandatory = $true, Position = 0)]
-    [ValidateNotNullOrEmpty()]
+    [Parameter(Position = 0)]
     [string] $FontPath,
 
     [string] $OutputDirectory,
@@ -16,6 +15,22 @@ $ErrorActionPreference = 'Stop'
 
 $Script:StatusPrefix = 'FUSION_FONT_REPAIR_JSON:'
 $Script:FontRegistryPath = 'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Fonts'
+$Script:UserFontRegistryPath = 'HKCU:\Software\Microsoft\Windows NT\CurrentVersion\Fonts'
+$Script:LogDirectory = Join-Path ([System.IO.Path]::GetTempPath()) 'FusionFontRepair'
+$Script:LogPath = Join-Path $Script:LogDirectory 'FusionFontRepair.log'
+
+function Write-RepairLog {
+    param([Parameter(Mandatory = $true)][string] $Message)
+
+    try {
+        New-Item -ItemType Directory -Force -Path $Script:LogDirectory | Out-Null
+        $timestamp = Get-Date -Format 'yyyy-MM-dd HH:mm:ss'
+        Add-Content -LiteralPath $Script:LogPath -Value "[$timestamp] $Message"
+    }
+    catch {
+        # Logging should never block the repair workflow.
+    }
+}
 
 function Show-RepairMessage {
     param(
@@ -70,6 +85,113 @@ function Resolve-FFPython {
     }
 
     throw 'Could not find FontForge ffpython.exe. Install FontForge or set FUSION_FONTFORGE_FFPYTHON to the full ffpython.exe path.'
+}
+
+function Get-FontRegistryCandidates {
+    $registryPaths = @(
+        @{
+            Path = $Script:FontRegistryPath
+            DefaultFolder = Join-Path $env:WINDIR 'Fonts'
+        },
+        @{
+            Path = $Script:UserFontRegistryPath
+            DefaultFolder = Join-Path $env:LOCALAPPDATA 'Microsoft\Windows\Fonts'
+        }
+    )
+
+    foreach ($entry in $registryPaths) {
+        if (-not (Test-Path -LiteralPath $entry.Path)) {
+            continue
+        }
+
+        $registryItem = Get-ItemProperty -LiteralPath $entry.Path
+        foreach ($property in $registryItem.PSObject.Properties) {
+            if ($property.MemberType -ne 'NoteProperty') {
+                continue
+            }
+
+            $displayName = ($property.Name -replace '\s+\((TrueType|OpenType|Type 1)\)$', '').Trim()
+            $fontValue = [string] $property.Value
+            if (-not $fontValue) {
+                continue
+            }
+
+            $candidatePath = if ([System.IO.Path]::IsPathRooted($fontValue)) {
+                $fontValue
+            }
+            else {
+                Join-Path $entry.DefaultFolder $fontValue
+            }
+
+            [pscustomobject]@{
+                DisplayName = $displayName
+                RegistryName = $property.Name
+                FontPath = $candidatePath
+                DefaultFolder = $entry.DefaultFolder
+            }
+        }
+    }
+}
+
+function Resolve-FontInputFile {
+    param([Parameter(Mandatory = $true)][string] $InputPath)
+
+    try {
+        $item = Get-Item -LiteralPath $InputPath -ErrorAction Stop
+        if ($item.PSIsContainer) {
+            throw 'Expected exactly one font file, but a folder was provided.'
+        }
+        return $item
+    }
+    catch [System.Management.Automation.ItemNotFoundException] {
+        # Windows' virtual Fonts shell can pass display paths such as
+        # C:\Windows\Fonts\Bahnschrift instead of the real bahnschrift.ttf file.
+    }
+
+    $lookupName = Split-Path -Leaf $InputPath
+    if (-not $lookupName) {
+        $lookupName = $InputPath
+    }
+    $lookupName = ($lookupName -replace '\.(ttf|otf)$', '').Trim()
+    if (-not $lookupName) {
+        throw "Font file not found: $InputPath"
+    }
+
+    $candidates = @(Get-FontRegistryCandidates | Where-Object {
+            $_.DisplayName -ieq $lookupName -or
+            $lookupName.StartsWith($_.DisplayName + ' ', [StringComparison]::OrdinalIgnoreCase) -or
+            $_.RegistryName -like "$lookupName (*"
+        })
+
+    $existingCandidates = @($candidates | Where-Object { Test-Path -LiteralPath $_.FontPath })
+    if ($existingCandidates.Count -eq 1) {
+        Write-Host "Resolved Windows Fonts shell item '$InputPath' to '$($existingCandidates[0].FontPath)'."
+        return Get-Item -LiteralPath $existingCandidates[0].FontPath -ErrorAction Stop
+    }
+
+    if ($existingCandidates.Count -gt 1) {
+        $windowsFontsFolder = Join-Path $env:WINDIR 'Fonts'
+        if ($InputPath.StartsWith($windowsFontsFolder, [StringComparison]::OrdinalIgnoreCase)) {
+            $systemMatches = @($existingCandidates | Where-Object {
+                    $_.FontPath.StartsWith($windowsFontsFolder, [StringComparison]::OrdinalIgnoreCase)
+                })
+            if ($systemMatches.Count -eq 1) {
+                Write-Host "Resolved Windows Fonts shell item '$InputPath' to '$($systemMatches[0].FontPath)'."
+                return Get-Item -LiteralPath $systemMatches[0].FontPath -ErrorAction Stop
+            }
+        }
+
+        $exact = @($existingCandidates | Where-Object { $_.DisplayName -ieq $lookupName })
+        if ($exact.Count -eq 1) {
+            Write-Host "Resolved Windows Fonts shell item '$InputPath' to '$($exact[0].FontPath)'."
+            return Get-Item -LiteralPath $exact[0].FontPath -ErrorAction Stop
+        }
+
+        $matches = ($existingCandidates | ForEach-Object { "$($_.DisplayName) -> $($_.FontPath)" }) -join [Environment]::NewLine
+        throw "The Windows Fonts shell item '$InputPath' matched more than one installed font. Run the tool from the real .ttf/.otf file instead.$([Environment]::NewLine)$matches"
+    }
+
+    throw "Font file not found: $InputPath. If you launched this from C:\Windows\Fonts, try right-clicking the real .ttf/.otf file or run the command with the backing file path."
 }
 
 function Invoke-FontForgeWorker {
@@ -248,12 +370,14 @@ $tempOutputDirectory = $null
 $generatedPath = $null
 
 try {
-    $fontItem = Get-Item -LiteralPath $FontPath -ErrorAction Stop
-    if ($fontItem.PSIsContainer) {
-        throw 'Expected exactly one font file, but a folder was provided.'
+    Write-RepairLog "Started. FontPath='$FontPath' NoInstall=$NoInstall OutputDirectory='$OutputDirectory' ShowMessage=$ShowMessage"
+    if ([string]::IsNullOrWhiteSpace($FontPath)) {
+        throw 'No font file was passed to the repair command. Try the command from a normal font file, or run Repair-FusionFont.ps1 with a .ttf/.otf path.'
     }
 
+    $fontItem = Resolve-FontInputFile -InputPath $FontPath
     Assert-SupportedFontFile -FontFile $fontItem
+    Write-RepairLog "Resolved input to '$($fontItem.FullName)'."
 
     if (-not $NoInstall -and -not (Test-IsAdministrator)) {
         Write-Host 'Administrator permission is required to install into C:\Windows\Fonts. Requesting elevation...'
@@ -299,6 +423,7 @@ try {
 
     if ($NoInstall) {
         $message = "Created repaired font:`n$generatedPath`n`nInternal font name:`n$($result.full_name)"
+        Write-RepairLog "Success. Created '$($result.full_name)' at '$generatedPath' without installing."
         Write-Host $message
         Show-RepairMessage -Message $message -Icon Information
         exit 0
@@ -312,12 +437,14 @@ try {
     }
 
     $message = "Installed repaired font:`n$($result.full_name)`n`nFile:`n$installedPath"
+    Write-RepairLog "Success. Installed '$($result.full_name)' to '$installedPath'."
     Write-Host $message
     Show-RepairMessage -Message $message -Icon Information
     exit 0
 }
 catch {
     $message = $_.Exception.Message
+    Write-RepairLog "Error: $message"
     Write-Error $message
     Show-RepairMessage -Message $message -Icon Error
     exit 1
