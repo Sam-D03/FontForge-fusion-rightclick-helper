@@ -90,7 +90,21 @@ def collect_languages(font) -> set[str]:
     return languages
 
 
-def build_plan(source_path: Path, font) -> dict:
+def fusion_family_name(source_name: str) -> str:
+    target = safe_display_name(source_name)
+    if not target.upper().startswith("FUSION "):
+        target = "FUSION " + target
+    return safe_display_name(target)
+
+
+def full_name_for_style(family_name: str, style_name: str) -> str:
+    style = safe_display_name(style_name)
+    if style.upper() == "REGULAR":
+        return family_name
+    return safe_display_name(f"{family_name} {style}")
+
+
+def build_plan(source_path: Path, font, target_family: str = "", target_style: str = "") -> dict:
     extension = source_path.suffix.lower()
     if extension not in SUPPORTED_EXTENSIONS:
         supported = ", ".join(sorted(SUPPORTED_EXTENSIONS))
@@ -100,28 +114,32 @@ def build_plan(source_path: Path, font) -> dict:
     source_family = safe_display_name(getattr(font, "familyname", "") or first_sfnt_value(font, "Family"))
     source_full = safe_display_name(getattr(font, "fullname", "") or first_sfnt_value(font, "Fullname") or source_family)
 
-    target_base = source_full
-    if not target_base.upper().startswith("FUSION "):
-        target_base = "FUSION " + target_base
-    target_base = safe_display_name(target_base)
+    if target_family:
+        family_name = fusion_family_name(target_family)
+        subfamily_name = safe_display_name(target_style or "Regular")
+        full_name = full_name_for_style(family_name, subfamily_name)
+    else:
+        family_name = fusion_family_name(source_full)
+        subfamily_name = safe_display_name(target_style or "Regular")
+        full_name = full_name_for_style(family_name, subfamily_name)
 
-    ps_name = postscript_name(target_base.removeprefix("FUSION "), digest)
-    subfamily_name = "Regular"
-    filename = output_file_name(target_base, subfamily_name, extension)
+    ps_source = full_name.removeprefix("FUSION ")
+    ps_name = postscript_name(ps_source, digest)
+    filename = output_file_name(family_name, subfamily_name, extension)
     font_type = SUPPORTED_EXTENSIONS[extension]
 
     return {
         "source_path": str(source_path),
         "source_family": source_family,
         "source_full_name": source_full,
-        "family_name": target_base,
-        "full_name": target_base,
+        "family_name": family_name,
+        "full_name": full_name,
         "subfamily_name": subfamily_name,
         "postscript_name": ps_name,
         "unique_id": f"FusionFontRepair:{ps_name}:{digest[:16]}",
         "output_file_name": filename,
         "font_type": font_type,
-        "registry_name": f"{target_base} ({font_type})",
+        "registry_name": f"{full_name} ({font_type})",
     }
 
 
@@ -167,7 +185,7 @@ def run(args: argparse.Namespace) -> int:
     font = None
     try:
         font = fontforge.open(str(source_path))
-        plan = build_plan(source_path, font)
+        plan = build_plan(source_path, font, args.target_family, args.target_style)
 
         if args.plan_only:
             emit({"ok": True, "mode": "plan", **plan})
@@ -209,6 +227,8 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Create a Fusion-prefixed repaired copy of a font.")
     parser.add_argument("--input", required=True, help="Path to a .ttf or .otf file.")
     parser.add_argument("--output-dir", default=os.getcwd(), help="Directory for the generated font.")
+    parser.add_argument("--target-family", default="", help="Original family name to prefix with FUSION.")
+    parser.add_argument("--target-style", default="", help="Target style name, such as Bold.")
     parser.add_argument("--plan-only", action="store_true", help="Read metadata and report target names without generating.")
     return parser.parse_args(argv)
 

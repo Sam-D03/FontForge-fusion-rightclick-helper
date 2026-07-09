@@ -40,11 +40,13 @@ VersionInfoProductVersion={#AppVersion}
 [Files]
 Source: "..\Repair-FusionFont.ps1"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\fusion_font_repair.py"; DestDir: "{app}"; Flags: ignoreversion
+Source: "..\prepare_variable_instance.py"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\Install-ContextMenu.ps1"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\Uninstall-ContextMenu.ps1"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\Remove-FusionFont.ps1"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\README.md"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\LICENSE"; DestDir: "{app}"; Flags: ignoreversion
+Source: "..\build\python-vendor\*"; DestDir: "{app}\vendor"; Flags: ignoreversion recursesubdirs createallsubdirs
 
 [Icons]
 Name: "{group}\Fusion FontForge Helper README"; Filename: "{app}\README.md"

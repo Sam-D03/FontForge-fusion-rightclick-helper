@@ -12,6 +12,7 @@ If you normally open a font in FontForge, select every glyph, run **Overlap > Re
 - Removes overlaps from every glyph in the font.
 - Creates a separate font identity named `FUSION <original font name>`.
 - Uses a human-readable installed filename such as `FUSION Bahnschrift Regular.ttf` so Windows' Fonts search has a better chance of finding it.
+- Preserves selected variable-font instances from Windows' Fonts folder, such as `Bahnschrift Bold`, by creating a static instance before running FontForge.
 - Installs the repaired font into `C:\Windows\Fonts`.
 - Stops if a matching `FUSION ...` font already appears to be installed.
 - Runs only when you right-click a font. There is no background service.
@@ -66,11 +67,14 @@ On Windows 11 the item may appear under **Show more options** depending on your 
 5. Restart Fusion 360 if it was already open.
 6. Pick the new `FUSION ...` font in Fusion 360.
 
-The generated font uses:
+For a normal single font file, the generated font uses:
 
 - Family name: `FUSION <original full font name>`
 - Full name: `FUSION <original full font name>`
+- Style name: `Regular`
 - PostScript name: `FUSION-<sanitized-original-name>`
+
+When you launch the helper from Windows' special Fonts folder on a variable-font face, the selected face is preserved. For example, right-clicking **Bahnschrift Bold** generates and installs `FUSION Bahnschrift Bold.ttf` with family `FUSION Bahnschrift` and style `Bold`.
 
 ## Generate Without Installing
 
@@ -137,6 +141,8 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\build-installer.ps1 -V
 ```
 
 The build writes `dist\FusionFontForgeHelperSetup-<version>.exe` and a matching `.sha256` checksum file.
+
+The build also vendors `fontTools` into `build\python-vendor` so the installed app can instantiate selected variable-font styles without requiring users to install Python.
 
 ## Troubleshooting
 

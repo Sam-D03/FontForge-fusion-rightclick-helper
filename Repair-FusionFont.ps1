@@ -9,6 +9,10 @@ param(
 
     [switch] $ShowMessage,
 
+    [string] $RequestedFamilyName,
+
+    [string] $RequestedStyleName,
+
     [string] $StatusFile,
 
     [switch] $DeferMessageToParent
@@ -218,6 +222,49 @@ function Get-FontRegistryCandidates {
     }
 }
 
+function Get-RequestedStyleFromDisplayName {
+    param(
+        [Parameter(Mandatory = $true)][string] $LookupName,
+        [Parameter(Mandatory = $true)][string] $FamilyName
+    )
+
+    $lookup = ($LookupName -replace '\.(ttf|otf)$', '').Trim()
+    $family = $FamilyName.Trim()
+    if (-not $lookup -or -not $family) {
+        return $null
+    }
+
+    if ($lookup.Equals($family, [StringComparison]::OrdinalIgnoreCase)) {
+        return $null
+    }
+
+    $prefix = $family + ' '
+    if ($lookup.StartsWith($prefix, [StringComparison]::OrdinalIgnoreCase)) {
+        $style = $lookup.Substring($prefix.Length).Trim()
+        if ($style) {
+            return $style
+        }
+    }
+
+    return $null
+}
+
+function New-FontInputResolution {
+    param(
+        [Parameter(Mandatory = $true)][System.IO.FileInfo] $File,
+        [string] $FamilyName,
+        [string] $StyleName,
+        [string] $FaceName
+    )
+
+    [pscustomobject]@{
+        File = $File
+        RequestedFamilyName = $FamilyName
+        RequestedStyleName = $StyleName
+        RequestedFaceName = $FaceName
+    }
+}
+
 function Resolve-FontInputFile {
     param([Parameter(Mandatory = $true)][string] $InputPath)
 
@@ -226,7 +273,7 @@ function Resolve-FontInputFile {
         if ($item.PSIsContainer) {
             throw 'Expected exactly one font file, but a folder was provided.'
         }
-        return $item
+        return New-FontInputResolution -File $item
     }
     catch [System.Management.Automation.ItemNotFoundException] {
         # Windows' virtual Fonts shell can pass display paths such as
@@ -251,7 +298,12 @@ function Resolve-FontInputFile {
     $existingCandidates = @($candidates | Where-Object { Test-Path -LiteralPath $_.FontPath })
     if ($existingCandidates.Count -eq 1) {
         Write-Host "Resolved Windows Fonts shell item '$InputPath' to '$($existingCandidates[0].FontPath)'."
-        return Get-Item -LiteralPath $existingCandidates[0].FontPath -ErrorAction Stop
+        $styleName = Get-RequestedStyleFromDisplayName -LookupName $lookupName -FamilyName $existingCandidates[0].DisplayName
+        return New-FontInputResolution `
+            -File (Get-Item -LiteralPath $existingCandidates[0].FontPath -ErrorAction Stop) `
+            -FamilyName $existingCandidates[0].DisplayName `
+            -StyleName $styleName `
+            -FaceName $lookupName
     }
 
     if ($existingCandidates.Count -gt 1) {
@@ -262,14 +314,24 @@ function Resolve-FontInputFile {
                 })
             if ($systemMatches.Count -eq 1) {
                 Write-Host "Resolved Windows Fonts shell item '$InputPath' to '$($systemMatches[0].FontPath)'."
-                return Get-Item -LiteralPath $systemMatches[0].FontPath -ErrorAction Stop
+                $styleName = Get-RequestedStyleFromDisplayName -LookupName $lookupName -FamilyName $systemMatches[0].DisplayName
+                return New-FontInputResolution `
+                    -File (Get-Item -LiteralPath $systemMatches[0].FontPath -ErrorAction Stop) `
+                    -FamilyName $systemMatches[0].DisplayName `
+                    -StyleName $styleName `
+                    -FaceName $lookupName
             }
         }
 
         $exact = @($existingCandidates | Where-Object { $_.DisplayName -ieq $lookupName })
         if ($exact.Count -eq 1) {
             Write-Host "Resolved Windows Fonts shell item '$InputPath' to '$($exact[0].FontPath)'."
-            return Get-Item -LiteralPath $exact[0].FontPath -ErrorAction Stop
+            $styleName = Get-RequestedStyleFromDisplayName -LookupName $lookupName -FamilyName $exact[0].DisplayName
+            return New-FontInputResolution `
+                -File (Get-Item -LiteralPath $exact[0].FontPath -ErrorAction Stop) `
+                -FamilyName $exact[0].DisplayName `
+                -StyleName $styleName `
+                -FaceName $lookupName
         }
 
         $matches = ($existingCandidates | ForEach-Object { "$($_.DisplayName) -> $($_.FontPath)" }) -join [Environment]::NewLine
@@ -342,7 +404,7 @@ function Invoke-FontForgeWorker {
     $payload = $jsonLine.Substring($statusPrefix.Length) | ConvertFrom-Json
     if ($exitCode -ne 0 -or -not $payload.ok) {
         $details = if ($payload.error) { $payload.error } else { "FontForge exited with code $exitCode." }
-        $noise = $rawOutput | Where-Object { -not $_.StartsWith($statusPrefix, [StringComparison]::Ordinal) }
+        $noise = @($rawOutput | Where-Object { -not $_.StartsWith($statusPrefix, [StringComparison]::Ordinal) })
         if ($noise.Count -gt 0) {
             $details += [Environment]::NewLine + ($noise -join [Environment]::NewLine)
         }
@@ -434,7 +496,11 @@ public static class FusionFontRepairNative {
 }
 
 function Start-ElevatedSelf {
-    param([Parameter(Mandatory = $true)][string] $ResolvedFontPath)
+    param(
+        [Parameter(Mandatory = $true)][string] $ResolvedFontPath,
+        [string] $FamilyName,
+        [string] $StyleName
+    )
 
     $powershell = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
     $childStatusFile = if ($StatusFile) {
@@ -459,6 +525,12 @@ function Start-ElevatedSelf {
     )
     if ($OutputDirectory) {
         $arguments += @('-OutputDirectory', $OutputDirectory)
+    }
+    if ($FamilyName) {
+        $arguments += @('-RequestedFamilyName', $FamilyName)
+    }
+    if ($StyleName) {
+        $arguments += @('-RequestedStyleName', $StyleName)
     }
     if ($NoInstall) {
         $arguments += '-NoInstall'
@@ -487,6 +559,7 @@ function Start-ElevatedSelf {
 }
 
 $tempOutputDirectory = $null
+$tempPreparationDirectory = $null
 $generatedPath = $null
 
 try {
@@ -495,13 +568,24 @@ try {
         throw 'No font file was passed to the repair command. Try the command from a normal font file, or run Repair-FusionFont.ps1 with a .ttf/.otf path.'
     }
 
-    $fontItem = Resolve-FontInputFile -InputPath $FontPath
+    $fontResolution = Resolve-FontInputFile -InputPath $FontPath
+    $fontItem = $fontResolution.File
+    if (-not $RequestedFamilyName -and $fontResolution.RequestedFamilyName) {
+        $RequestedFamilyName = $fontResolution.RequestedFamilyName
+    }
+    if (-not $RequestedStyleName -and $fontResolution.RequestedStyleName) {
+        $RequestedStyleName = $fontResolution.RequestedStyleName
+    }
+
     Assert-SupportedFontFile -FontFile $fontItem
     Write-RepairLog "Resolved input to '$($fontItem.FullName)'."
+    if ($RequestedFamilyName -or $RequestedStyleName) {
+        Write-RepairLog "Requested face metadata. Family='$RequestedFamilyName' Style='$RequestedStyleName'."
+    }
 
     if (-not $NoInstall -and -not (Test-IsAdministrator)) {
         Write-Host 'Administrator permission is required to install into C:\Windows\Fonts. Requesting elevation...'
-        Start-ElevatedSelf -ResolvedFontPath $fontItem.FullName
+        Start-ElevatedSelf -ResolvedFontPath $fontItem.FullName -FamilyName $RequestedFamilyName -StyleName $RequestedStyleName
     }
 
     $scriptDirectory = Split-Path -Parent $PSCommandPath
@@ -509,15 +593,47 @@ try {
     if (-not (Test-Path -LiteralPath $workerScript)) {
         throw "Missing worker script: $workerScript"
     }
+    $preparerScript = Join-Path $scriptDirectory 'prepare_variable_instance.py'
 
     $ffPython = Resolve-FFPython
     Write-Host "Using FontForge Python: $ffPython"
     Write-Host "Reading font: $($fontItem.FullName)"
 
-    $plan = Invoke-FontForgeWorker -FFPython $ffPython -WorkerScript $workerScript -WorkerArguments @(
-        '--input', $fontItem.FullName,
-        '--plan-only'
-    )
+    $workerInputPath = $fontItem.FullName
+    if ($RequestedStyleName) {
+        if (-not (Test-Path -LiteralPath $preparerScript)) {
+            throw "Missing variable-font preparer script: $preparerScript"
+        }
+
+        $tempRoot = Join-Path ([System.IO.Path]::GetTempPath()) 'FusionFontRepair'
+        New-Item -ItemType Directory -Force -Path $tempRoot | Out-Null
+        $tempPreparationDirectory = Join-Path $tempRoot ("prepare-{0}" -f [guid]::NewGuid().ToString('N'))
+        New-Item -ItemType Directory -Force -Path $tempPreparationDirectory | Out-Null
+
+        Write-Host "Preparing selected font style: $RequestedStyleName"
+        $preparation = Invoke-FontForgeWorker -FFPython $ffPython -WorkerScript $preparerScript -WorkerArguments @(
+            '--input', $fontItem.FullName,
+            '--output-dir', $tempPreparationDirectory,
+            '--style-name', $RequestedStyleName
+        )
+        if ($preparation.instantiated) {
+            $workerInputPath = [string] $preparation.output_path
+            Write-RepairLog "Prepared variable-font instance '$($preparation.matched_style)' at '$workerInputPath'."
+        }
+        elseif ($preparation.warning) {
+            Write-RepairLog "Variable-font preparation warning: $($preparation.warning)"
+        }
+    }
+
+    $workerBaseArguments = @('--input', $workerInputPath)
+    if ($RequestedFamilyName) {
+        $workerBaseArguments += @('--target-family', $RequestedFamilyName)
+    }
+    if ($RequestedStyleName) {
+        $workerBaseArguments += @('--target-style', $RequestedStyleName)
+    }
+
+    $plan = Invoke-FontForgeWorker -FFPython $ffPython -WorkerScript $workerScript -WorkerArguments ($workerBaseArguments + @('--plan-only'))
 
     if (-not $NoInstall) {
         Assert-NoInstalledDuplicate -Plan $plan
@@ -535,15 +651,15 @@ try {
     }
 
     Write-Host "Creating repaired font: $($plan.full_name)"
-    $result = Invoke-FontForgeWorker -FFPython $ffPython -WorkerScript $workerScript -WorkerArguments @(
-        '--input', $fontItem.FullName,
-        '--output-dir', $targetOutputDirectory
-    )
+    $result = Invoke-FontForgeWorker -FFPython $ffPython -WorkerScript $workerScript -WorkerArguments ($workerBaseArguments + @('--output-dir', $targetOutputDirectory))
     $generatedPath = $result.output_path
 
     if ($NoInstall) {
         $message = "Created repaired font:`n$generatedPath`n`nInternal font name:`n$($result.full_name)"
         Write-RepairLog "Success. Created '$($result.full_name)' at '$generatedPath' without installing."
+        if ($tempPreparationDirectory -and (Test-Path -LiteralPath $tempPreparationDirectory)) {
+            Remove-Item -LiteralPath $tempPreparationDirectory -Recurse -Force -ErrorAction SilentlyContinue
+        }
         Write-Host $message
         Write-RepairStatus -Message $message -Icon Information -ExitCode 0
         Show-RepairMessage -Message $message -Icon Information
@@ -556,6 +672,9 @@ try {
     if ($tempOutputDirectory -and (Test-Path -LiteralPath $tempOutputDirectory)) {
         Remove-Item -LiteralPath $tempOutputDirectory -Recurse -Force -ErrorAction SilentlyContinue
     }
+    if ($tempPreparationDirectory -and (Test-Path -LiteralPath $tempPreparationDirectory)) {
+        Remove-Item -LiteralPath $tempPreparationDirectory -Recurse -Force -ErrorAction SilentlyContinue
+    }
 
     $message = "Installed repaired font:`n$($result.full_name)`n`nFile:`n$installedPath"
     Write-RepairLog "Success. Installed '$($result.full_name)' to '$installedPath'."
@@ -567,6 +686,12 @@ try {
 catch {
     $message = $_.Exception.Message
     Write-RepairLog "Error: $message"
+    if ($tempOutputDirectory -and (Test-Path -LiteralPath $tempOutputDirectory)) {
+        Remove-Item -LiteralPath $tempOutputDirectory -Recurse -Force -ErrorAction SilentlyContinue
+    }
+    if ($tempPreparationDirectory -and (Test-Path -LiteralPath $tempPreparationDirectory)) {
+        Remove-Item -LiteralPath $tempPreparationDirectory -Recurse -Force -ErrorAction SilentlyContinue
+    }
     Write-Error $message
     Write-RepairStatus -Message $message -Icon Error -ExitCode 1
     Show-RepairMessage -Message $message -Icon Error
